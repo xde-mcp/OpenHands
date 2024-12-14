@@ -430,7 +430,7 @@ class LLM(RetryMixin, DebugMixin):
         """Post-process the completion response.
 
         Logs the cost and usage stats of the completion call.
-        Updates token counts in the assistant message if usage data is available.
+        Updates token counts in the assistant message (action) if usage data is available.
         """
         try:
             cur_cost = self._completion_cost(response)
