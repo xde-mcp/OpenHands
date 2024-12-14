@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 
 
@@ -7,10 +6,7 @@ class SessionInitData:
     """
     Session initialization data for the web environment - a deep copy of the global config is made and then overridden with this data.
     """
-<<<<<<< HEAD
-=======
 
->>>>>>> d317a3ef (Fix pr #5248: Fix issue #2947: Feat: make use of litellm's response "usage" data)
     language: str | None = None
     agent: str | None = None
     max_iterations: int | None = None
