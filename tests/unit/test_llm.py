@@ -433,7 +433,9 @@ def test_token_count_with_usage_data(mock_litellm_completion, default_config):
     assert response.usage.total_tokens == 30
 
     # Verify get_token_count uses the token counts from Usage data
-    # The message from the response should have the token counts stored
+    # The message from the response should have the usage data stored
+    assert response.choices[0].message.usage == response.usage
+    # Properties should still work
     assert response.choices[0].message.total_tokens == 30
     assert response.choices[0].message.prompt_tokens == 10
     assert response.choices[0].message.completion_tokens == 20

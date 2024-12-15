@@ -181,9 +181,7 @@ class CodeActAgent(Agent):
             )
             # Update token counts if Usage data is available
             if llm_response.usage:
-                message.prompt_tokens = llm_response.usage.prompt_tokens
-                message.completion_tokens = llm_response.usage.completion_tokens
-                message.total_tokens = llm_response.usage.total_tokens
+                message.usage = llm_response.usage
             pending_tool_call_action_messages[llm_response.id] = message
             return []
         elif isinstance(action, AgentFinishAction):

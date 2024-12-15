@@ -13,12 +13,12 @@ def test_get_token_count_with_stored_tokens():
         Message(
             role='user',
             content=[TextContent(text='Hello')],
-            total_tokens=5,
+            usage=type('Usage', (), {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5})(),
         ),
         Message(
             role='assistant',
             content=[TextContent(text='Hi there')],
-            total_tokens=10,
+            usage=type('Usage', (), {'prompt_tokens': 4, 'completion_tokens': 6, 'total_tokens': 10})(),
         ),
     ]
 
@@ -36,12 +36,12 @@ def test_get_token_count_fallback():
         Message(
             role='user',
             content=[TextContent(text='Hello')],
-            total_tokens=5,
+            usage=type('Usage', (), {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5})(),
         ),
         Message(
             role='assistant',
             content=[TextContent(text='Hi there')],
-            # No total_tokens set
+            # No usage set
         ),
     ]
 
@@ -74,6 +74,8 @@ def test_update_message_token_counts():
     llm._update_message_token_counts(message, usage)
 
     # Check that token counts were updated
+    assert message.usage == usage  # Direct usage object comparison
+    # Check that properties still work
     assert message.prompt_tokens == 5
     assert message.completion_tokens == 10
     assert message.total_tokens == 15
@@ -89,13 +91,13 @@ def test_get_token_count_with_event_id():
         Message(
             role='user',
             content=[TextContent(text='Hello')],
-            total_tokens=5,
+            usage=type('Usage', (), {'prompt_tokens': 2, 'completion_tokens': 3, 'total_tokens': 5})(),
             event_id=1,
         ),
         Message(
             role='assistant',
             content=[TextContent(text='Hi there')],
-            total_tokens=10,
+            usage=type('Usage', (), {'prompt_tokens': 4, 'completion_tokens': 6, 'total_tokens': 10})(),
             event_id=2,
         ),
     ]

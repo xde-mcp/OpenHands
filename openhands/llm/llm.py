@@ -504,12 +504,12 @@ class LLM(RetryMixin, DebugMixin):
         Returns:
             int: The number of tokens.
         """
-        # First check if we have stored token counts
+        # First check if we have stored usage data
         total_tokens = 0
         all_tokens_available = True
         for msg in messages:
-            if msg.total_tokens is not None:
-                total_tokens += msg.total_tokens
+            if msg.usage is not None and msg.usage.total_tokens is not None:
+                total_tokens += msg.usage.total_tokens
             else:
                 all_tokens_available = False
                 break
@@ -668,6 +668,4 @@ class LLM(RetryMixin, DebugMixin):
         """
         if usage is not None:
             # Update token counts in the message
-            message.prompt_tokens = usage.prompt_tokens
-            message.completion_tokens = usage.completion_tokens
-            message.total_tokens = usage.total_tokens
+            message.usage = usage
