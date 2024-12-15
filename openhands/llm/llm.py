@@ -122,6 +122,12 @@ class LLM(RetryMixin, DebugMixin):
         if self.is_function_calling_active():
             logger.debug('LLM: model supports function calling')
 
+        # if using a custom tokenizer, make sure it's loaded and accessible in the format expected by litellm
+        if self.config.custom_tokenizer is not None:
+            self.tokenizer = create_pretrained_tokenizer(self.config.custom_tokenizer)
+        else:
+            self.tokenizer = None
+
         self._completion = partial(
             litellm_completion,
             model=self.config.model,
@@ -495,79 +501,56 @@ class LLM(RetryMixin, DebugMixin):
 
         return cur_cost
 
-    def get_token_count(self, messages: list[Message]) -> int:
-        """Get the number of tokens in a list of messages.
+    def get_token_count(self, messages: list[dict] | list[Message]) -> int:
+        """Get the number of tokens in a list of messages. Use dicts for better token counting.
 
         Args:
-            messages (list[Message]): A list of Message objects.
-
+            messages (list): A list of messages, either as a list of dicts or as a list of Message objects.
         Returns:
             int: The number of tokens.
         """
-        # First check if we have stored usage data
-        total_tokens = 0
-        all_tokens_available = True
-        for msg in messages:
-            if msg.usage is not None and msg.usage.total_tokens is not None:
-                total_tokens += msg.usage.total_tokens
-            else:
-                all_tokens_available = False
-                break
-
-        if all_tokens_available:
-            return total_tokens
-
-        # Fallback to litellm token counter
-        try:
-            # Convert Message objects to litellm format
-            litellm_messages = []
+        # First check if we have stored usage data for Message objects
+        if (
+            isinstance(messages, list)
+            and len(messages) > 0
+            and isinstance(messages[0], Message)
+        ):
+            total_tokens = 0
+            all_tokens_available = True
             for msg in messages:
-                # Convert Message to dict in litellm format
-                msg_dict = msg.model_dump()
-                # litellm expects content to be a list of content items
-                content = []
-                for item in msg_dict['content']:
-                    if item['type'] == 'text':
-                        content.append({'type': 'text', 'text': item['text']})
-                    elif item['type'] == 'image_url':
-                        content.append(
-                            {'type': 'image_url', 'image_url': item['image_url']}
-                        )
+                if msg.usage is not None and msg.usage.total_tokens is not None:
+                    total_tokens += msg.usage.total_tokens
+                else:
+                    all_tokens_available = False
+                    break
 
-                litellm_msg = {
-                    'role': msg_dict['role'],
-                    'content': content,
-                }
-                # Include tool calls if present
-                if msg_dict.get('tool_calls'):
-                    litellm_msg['tool_calls'] = msg_dict['tool_calls']
-                # Include tool response fields if present
-                if msg_dict.get('tool_call_id'):
-                    litellm_msg['tool_call_id'] = msg_dict['tool_call_id']
-                if msg_dict.get('name'):
-                    litellm_msg['name'] = msg_dict['name']
-                litellm_messages.append(litellm_msg)
+            if all_tokens_available:
+                return total_tokens
 
-            logger.debug(
-                f'Calling litellm.token_counter with messages: {litellm_messages}'
+            # Convert Message objects to dicts for litellm
+            logger.info(
+                'Message objects now include serialized tool calls in token counting'
             )
-            # Convert content to string for single text content
-            for msg in litellm_messages:
-                if (
-                    isinstance(msg['content'], list)
-                    and len(msg['content']) == 1
-                    and msg['content'][0]['type'] == 'text'
-                ):
-                    msg['content'] = msg['content'][0]['text']
+            messages = self.format_messages_for_llm(messages)  # type: ignore
 
-            result = litellm.token_counter(
-                model=self.config.model, messages=litellm_messages
+        # try to get the token count with the default litellm tokenizers
+        # or the custom tokenizer if set for this LLM configuration
+        try:
+            return litellm.token_counter(
+                model=self.config.model,
+                messages=messages,
+                custom_tokenizer=self.tokenizer,
             )
-            logger.debug(f'litellm.token_counter returned: {result}')
-            return result
         except Exception as e:
-            # TODO: this is to limit logspam in case token count is not supported
-            logger.debug(f'Error in token_counter: {e}')
+            # limit logspam in case token count is not supported
+            logger.error(
+                f'Error getting token count for\n model {self.config.model}\n{e}'
+                + (
+                    f'\ncustom_tokenizer: {self.config.custom_tokenizer}'
+                    if self.config.custom_tokenizer is not None
+                    else ''
+                )
+            )
             return 0
 
     def _is_local(self) -> bool:
