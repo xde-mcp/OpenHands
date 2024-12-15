@@ -519,6 +519,9 @@ class LLM(RetryMixin, DebugMixin):
             total_tokens = 0
             all_tokens_available = True
             for msg in messages:
+                if not isinstance(msg, Message):
+                    all_tokens_available = False
+                    break
                 if msg.usage is not None and msg.usage.total_tokens is not None:
                     total_tokens += msg.usage.total_tokens
                 else:
