@@ -77,3 +77,30 @@ def test_update_message_token_counts():
     assert message.prompt_tokens == 5
     assert message.completion_tokens == 10
     assert message.total_tokens == 15
+
+
+def test_get_token_count_with_event_id():
+    """Test get_token_count with messages linked to events."""
+    config = LLMConfig(model='test-model')
+    llm = LLM(config)
+
+    # Create messages with stored token counts and event_ids
+    messages = [
+        Message(
+            role='user',
+            content=[TextContent(text='Hello')],
+            total_tokens=5,
+            event_id=1,
+        ),
+        Message(
+            role='assistant',
+            content=[TextContent(text='Hi there')],
+            total_tokens=10,
+            event_id=2,
+        ),
+    ]
+
+    # Should return sum of stored token counts
+    assert llm.get_token_count(messages) == 15
+    assert messages[0].event_id == 1
+    assert messages[1].event_id == 2
