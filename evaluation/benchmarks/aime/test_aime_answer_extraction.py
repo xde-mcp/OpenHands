@@ -97,5 +97,15 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
         self.assertTrue(result.test_result['result'])
         self.assertEqual(result.test_result['last_message'], "Thinking... <<FINAL_ANSWER||11||FINAL_ANSWER>>")
 
+    def test_multiline_answer_extraction(self):
+        multiline_answer = """
+        Some text before the answer
+        <<FINAL_ANSWER||
+        289
+        ||FINAL_ANSWER>>
+        Some text after the answer
+        """
+        self.assertEqual(parse_final_answer(multiline_answer), "289")
+
 if __name__ == '__main__':
     unittest.main()
