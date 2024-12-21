@@ -174,6 +174,10 @@ Ok now it's time to start solving the question. Good luck!
     final_message = None
     for event in reversed(state.history):
         if hasattr(event, 'role') and event.role == 'assistant':
+            if hasattr(event, 'thought'):
+                logger.info(f"Thought: {event.thought}")
+            if hasattr(event, 'content'):
+                logger.info(f"Content: {event.content}")
             if hasattr(event, 'thought') and '<<FINAL_ANSWER||' in event.thought:
                 final_message = event.thought
                 break

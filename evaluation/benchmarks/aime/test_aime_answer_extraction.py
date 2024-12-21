@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 import sys
 import os
+import pandas as pd
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
@@ -15,14 +16,14 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
     @patch('evaluation.benchmarks.aime.run_infer.call_async_from_sync')
     @patch('evaluation.benchmarks.aime.run_infer.asyncio.run')
     def test_answer_extraction(self, mock_asyncio_run, mock_call_async, mock_create_runtime):
-        # Create a dictionary for the instance
-        mock_instance = {
+        # Create a pandas Series for the instance
+        mock_instance = pd.Series({
             'instance_id': '2023-I-2',
             'Answer': '42',
             'Year': 2023,
             'Problem Number': 2,
             'Question': 'Test AIME question'
-        }
+        })
 
         mock_metadata = Mock(spec=EvalMetadata)
         mock_metadata.agent_class = 'CodeActAgent'
@@ -65,13 +66,13 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
         self.assertEqual(parse_final_answer("No answer here"), None)
 
     def test_answer_extraction_from_thought(self):
-        mock_instance = {
+        mock_instance = pd.Series({
             'instance_id': '2023-I-3',
             'Answer': '11',
             'Year': 2023,
             'Problem Number': 3,
             'Question': 'Test AIME question'
-        }
+        })
         mock_metadata = Mock(spec=EvalMetadata)
         mock_metadata.agent_class = 'CodeActAgent'
         mock_state = Mock(spec=State)
