@@ -107,5 +107,15 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
         """
         self.assertEqual(parse_final_answer(multiline_answer), "289")
 
+        # Test for specific answers (289 and 881)
+        self.assertEqual(parse_final_answer("Some text <<FINAL_ANSWER||289||FINAL_ANSWER>> more text"), "289")
+        self.assertEqual(parse_final_answer("Another text <<FINAL_ANSWER||881||FINAL_ANSWER>> end"), "881")
+
+    def test_no_extraction_outside_tags(self):
+        answer1 = "The final result is m + n = 289"
+        answer2 = "We calculate that j + k = 881"
+        self.assertIsNone(parse_final_answer(answer1))
+        self.assertIsNone(parse_final_answer(answer2))
+
 if __name__ == '__main__':
     unittest.main()
