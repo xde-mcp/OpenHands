@@ -210,7 +210,7 @@ Ok now it's time to start solving the question. Good luck!
         error=state.last_error if state and state.last_error else None,
         test_result={
             'result': test_result,
-            'last_message': final_message,
+            'last_messages': final_messages,
         },
     )
     return output
