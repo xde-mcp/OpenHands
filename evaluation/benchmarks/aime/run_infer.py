@@ -28,7 +28,7 @@ from openhands.utils.async_utils import call_async_from_sync
 
 ACTION_FORMAT = """
 <<FINAL_ANSWER||
-<insert your final answer here>
+XXX
 ||FINAL_ANSWER>>
 """.strip()
 
@@ -40,7 +40,7 @@ def aime_codeact_user_response(
 ) -> str:
     msg = (
         'If you have finished reporting the answer in the expected format, (and only once that is done), please use the "finish" tool to finish the interaction.\n'
-        f'Again, you must report the answer in the following format before exiting:\n{ACTION_FORMAT}\n'
+        f'Again, you must report the answer in the following format before exiting, where XXX is the integer answer you have found:\n{ACTION_FORMAT}\n'
         'If you have not yet continued the task, please continue working on the task, possibly considering multiple approaches if you are stuck.\n'
         'Feel free to use all tools for calculations and solving the problem.\n'
         'IMPORTANT: YOU SHOULD NEVER ASK FOR HUMAN HELP TO SOLVE THIS TASK.\n'
@@ -141,9 +141,11 @@ Problem Number: {instance['Problem Number']}
 
 {instance['Question']}
 
-Once you have solved the problem, please use Python to verify your results. You can feel free to use numerical libraries such as numpy, sympy, or any others that will be helpful.
+Once you have solved the problem, please:
+1. Use Python to verify your results. You can feel free to use numerical libraries such as numpy, sympy, or any others that will be helpful.
+2. Check the Python code and the original problem statement to make sure they match directly.
+3. Once you have verified your results, report the answer in the following format, but instead of XXX put your answer in integer format:
 
-MOST IMPORTANT: Format your final answer as follows -- your answer should be a single integer:
 {ACTION_FORMAT}
 
 Additional Instructions:
