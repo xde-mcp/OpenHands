@@ -32,15 +32,16 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
 
         mock_state = Mock(spec=State)
         mock_state.history = [
-            Mock(role='human', content="User instruction with <<FINAL_ANSWER||24||FINAL_ANSWER>>"),
-            Mock(role='assistant', content="Agent response"),
-            Mock(role='assistant', thought="Thinking process"),
-            Mock(role='assistant', content="Final answer: <<FINAL_ANSWER||42||FINAL_ANSWER>>"),
+            Mock(source='user', content="User instruction with <<FINAL_ANSWER||24||FINAL_ANSWER>>"),
+            Mock(source='assistant', content="Agent response"),
+            Mock(source='assistant', thought="Thinking process"),
+            Mock(source='assistant', content="Final answer: <<FINAL_ANSWER||42||FINAL_ANSWER>>"),
         ]
         # Set the 'thought' and 'content' attributes to be strings
         for event in mock_state.history:
             event.thought = event.thought if isinstance(event.thought, str) else ""
             event.content = event.content if isinstance(event.content, str) else ""
+            event.source = event.source if isinstance(event.source, str) else ""
         mock_state.metrics = Mock()
         mock_state.metrics.get.return_value = {}
         mock_state.last_error = None
@@ -59,11 +60,11 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
 
         # Check if the correct answer was extracted
         self.assertTrue(result.test_result['result'])
-        self.assertEqual(result.test_result['last_message'], "Final answer: <<FINAL_ANSWER||42||FINAL_ANSWER>>")
+        self.assertEqual(result.test_result['final_message'], "Final answer: <<FINAL_ANSWER||42||FINAL_ANSWER>>")
         
         # Test parse_final_answer function
-        self.assertEqual(parse_final_answer("Some text <<FINAL_ANSWER||42||FINAL_ANSWER>> more text"), "42")
-        self.assertEqual(parse_final_answer("No answer here"), None)
+        self.assertEqual(parse_final_answer("Some text <<FINAL_ANSWER||42||FINAL_ANSWER>> more text"), 42)
+        self.assertIsNone(parse_final_answer("No answer here"))
 
     def test_answer_extraction_from_thought(self):
         mock_instance = pd.Series({
@@ -77,13 +78,14 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
         mock_metadata.agent_class = 'CodeActAgent'
         mock_state = Mock(spec=State)
         mock_state.history = [
-            Mock(role='assistant', thought="Thinking... <<FINAL_ANSWER||11||FINAL_ANSWER>>"),
-            Mock(role='assistant', content="Final message without answer"),
+            Mock(source='assistant', thought="Thinking... <<FINAL_ANSWER||11||FINAL_ANSWER>>"),
+            Mock(source='assistant', content="Final message without answer"),
         ]
-        # Set the 'thought' and 'content' attributes to be strings
+        # Set the attributes to be strings
         for event in mock_state.history:
             event.thought = event.thought if isinstance(event.thought, str) else ""
             event.content = event.content if isinstance(event.content, str) else ""
+            event.source = event.source if isinstance(event.source, str) else ""
         mock_state.metrics = Mock()
         mock_state.metrics.get.return_value = {}
         mock_state.last_error = None
@@ -95,7 +97,7 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
             result = process_instance(mock_instance, mock_metadata, reset_logger=False)
 
         self.assertTrue(result.test_result['result'])
-        self.assertEqual(result.test_result['last_message'], "Thinking... <<FINAL_ANSWER||11||FINAL_ANSWER>>")
+        self.assertEqual(result.test_result['final_message'], "Thinking... <<FINAL_ANSWER||11||FINAL_ANSWER>>")
 
     def test_multiline_answer_extraction(self):
         multiline_answer = """
@@ -105,17 +107,28 @@ class TestAIMEAnswerExtraction(unittest.TestCase):
         ||FINAL_ANSWER>>
         Some text after the answer
         """
-        self.assertEqual(parse_final_answer(multiline_answer), "289")
+        self.assertEqual(parse_final_answer(multiline_answer), 289)
 
         # Test for specific answers (289 and 881)
-        self.assertEqual(parse_final_answer("Some text <<FINAL_ANSWER||289||FINAL_ANSWER>> more text"), "289")
-        self.assertEqual(parse_final_answer("Another text <<FINAL_ANSWER||881||FINAL_ANSWER>> end"), "881")
+        self.assertEqual(parse_final_answer("Some text <<FINAL_ANSWER||289||FINAL_ANSWER>> more text"), 289)
+        self.assertEqual(parse_final_answer("Another text <<FINAL_ANSWER||881||FINAL_ANSWER>> end"), 881)
 
     def test_no_extraction_outside_tags(self):
         answer1 = "The final result is m + n = 289"
         answer2 = "We calculate that j + k = 881"
         self.assertIsNone(parse_final_answer(answer1))
         self.assertIsNone(parse_final_answer(answer2))
+        
+    def test_invalid_answer_formats(self):
+        # Test non-integer answers
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER||12.5||FINAL_ANSWER>>"))
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER||abc||FINAL_ANSWER>>"))
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER||||FINAL_ANSWER>>"))
+        
+        # Test malformed tags
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER|42||FINAL_ANSWER>>"))
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER||42|FINAL_ANSWER>>"))
+        self.assertIsNone(parse_final_answer("<<FINAL_ANSWER42FINAL_ANSWER>>"))
 
 if __name__ == '__main__':
     unittest.main()
