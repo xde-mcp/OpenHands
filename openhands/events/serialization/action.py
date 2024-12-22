@@ -71,6 +71,20 @@ def action_from_dict(action: dict) -> Action:
         args['image_urls'] = args.pop('images_urls')
 
     try:
+        # Handle enum conversions for known fields
+        if 'impl_source' in args:
+            if isinstance(args['impl_source'], str):
+                from openhands.events.event import FileReadSource, FileEditSource
+                try:
+                    if action['action'] == 'read':
+                        args['impl_source'] = FileReadSource[args['impl_source'].upper()]
+                    elif action['action'] == 'edit':
+                        args['impl_source'] = FileEditSource[args['impl_source'].upper()]
+                except KeyError:
+                    raise LLMMalformedActionError(
+                        f"Invalid impl_source value: {args['impl_source']}"
+                    )
+
         decoded_action = action_class(**args)
         if 'timeout' in action:
             decoded_action.timeout = action['timeout']
