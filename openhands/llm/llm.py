@@ -128,6 +128,7 @@ class LLM(RetryMixin, DebugMixin):
         else:
             self.tokenizer = None
 
+        # set up the completion function
         self._completion = partial(
             litellm_completion,
             model=self.config.model,
