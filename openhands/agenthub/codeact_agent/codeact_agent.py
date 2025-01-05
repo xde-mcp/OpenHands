@@ -287,10 +287,13 @@ class CodeActAgent(Agent):
             else:
                 text = truncate_content(
                     obs.content
-                    + f'\n
+                    + f'\n[Python Interpreter: {obs.metadata.py_interpreter_path}]',
+                    max_message_chars,
                 )
             text += f'\n[Command finished with exit code {obs.exit_code}]'
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
         elif isinstance(obs, IPythonRunCellObservation):
             text = obs.content
             # replace base64 images with a placeholder
@@ -302,10 +305,18 @@ class CodeActAgent(Agent):
                     )
             text = '\n'.join(splitted)
             text = truncate_content(text, max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
         elif isinstance(obs, FileEditObservation):
             text = truncate_content(str(obs), max_message_chars)
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
+        elif isinstance(obs, FileReadObservation):
+            message = Message(
+                role='user', content=[TextContent(text=obs.content)]
+            )  # Content is already truncated by openhands-aci
         elif isinstance(obs, BrowserOutputObservation):
             text = obs.get_agent_obs_text()
             message = Message(
@@ -318,15 +329,21 @@ class CodeActAgent(Agent):
                 obs.outputs['content'] if 'content' in obs.outputs else '',
                 max_message_chars,
             )
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
         elif isinstance(obs, ErrorObservation):
             text = truncate_content(obs.content, max_message_chars)
             text += '\n[Error occurred in processing last action]'
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
         elif isinstance(obs, UserRejectObservation):
             text = 'OBSERVATION:\n' + truncate_content(obs.content, max_message_chars)
             text += '\n[Last action has been rejected by the user]'
-            message = Message(role='user', content=[TextContent(text=text)], event_id=obs.id)
+            message = Message(
+                role='user', content=[TextContent(text=text)], event_id=obs.id
+            )
         else:
             # If an observation message is not returned, it will cause an error
             # when the LLM tries to return the next message
@@ -351,6 +368,7 @@ class CodeActAgent(Agent):
     def reset(self) -> None:
         """Resets the CodeAct Agent."""
         super().reset()
+        self.pending_actions.clear()
 
     def step(self, state: State) -> Action:
         """Performs one step using the CodeAct Agent.
@@ -493,18 +511,7 @@ class CodeActAgent(Agent):
                 if message:
                     if message.role == 'user':
                         self.prompt_manager.enhance_message(message)
-                    # handle error if the message is the SAME role as the previous message
-                    # litellm.exceptions.BadRequestError: litellm.BadRequestError: OpenAIException - Error code: 400 - {'detail': 'Only supports u/a/u/a/u...'}
-                    # there shouldn't be two consecutive messages from the same role
-                    # NOTE: we shouldn't combine tool messages because each of them has a different tool_call_id
-                    if (
-                        messages
-                        and messages[-1].role == message.role
-                        and message.role != 'tool'
-                    ):
-                        messages[-1].content.extend(message.content)
-                    else:
-                        messages.append(message)
+                    messages.append(message)
 
         if self.llm.is_caching_prompt_active():
             # NOTE: this is only needed for anthropic

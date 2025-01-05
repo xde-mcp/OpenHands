@@ -125,6 +125,15 @@ def test_response_latency_tracking(mock_time, mock_litellm_completion):
     assert response['id'] == 'test-response-123'
     assert response['choices'][0]['message']['content'] == 'Test response'
 
+    # To make sure the metrics fail gracefully, set the start/end time to go backwards.
+    mock_time.side_effect = [1000.0, 999.0]
+    llm.completion(messages=[{'role': 'user', 'content': 'Hello!'}])
+
+    # There should now be 2 latencies, the last of which has the value clipped to 0
+    assert len(llm.metrics.response_latencies) == 2
+    latency_record = llm.metrics.response_latencies[-1]
+    assert latency_record.latency == 0.0  # Should be lifted to 0 instead of being -1!
+
 
 def test_llm_reset():
     llm = LLM(LLMConfig(model='gpt-4o-mini', api_key='test_key'))
@@ -132,9 +141,9 @@ def test_llm_reset():
     initial_metrics.add_cost(1.0)
     initial_metrics.add_response_latency(0.5, 'test-id')
     llm.reset()
-    assert llm.metrics._accumulated_cost != initial_metrics._accumulated_cost
-    assert llm.metrics._costs != initial_metrics._costs
-    assert llm.metrics._response_latencies != initial_metrics._response_latencies
+    assert llm.metrics.accumulated_cost != initial_metrics.accumulated_cost
+    assert llm.metrics.costs != initial_metrics.costs
+    assert llm.metrics.response_latencies != initial_metrics.response_latencies
     assert isinstance(llm.metrics, Metrics)
 
 
@@ -448,10 +457,11 @@ def test_token_count_with_usage_data(mock_litellm_completion, default_config):
 
 @patch('openhands.llm.llm.litellm_completion')
 @patch('openhands.llm.llm.litellm.token_counter')
-def test_token_count_mixed_messages(mock_token_counter, mock_litellm_completion, default_config):
+def test_token_count_mixed_messages(
+    mock_token_counter, mock_litellm_completion, default_config
+):
     # Test a mix of messages with and without usage data
-    from litellm import Message as LiteLLMMessage
-    from litellm.types.utils import Choices, ModelResponse, Usage
+    from litellm.types.utils import Usage
 
     # Create messages with and without usage data
     msg1 = Message(role='user', content=[TextContent(text='Hello!')])
@@ -460,7 +470,9 @@ def test_token_count_mixed_messages(mock_token_counter, mock_litellm_completion,
     msg2 = Message(role='assistant', content=[TextContent(text='Hi there!')])
     msg2.usage = Usage(prompt_tokens=0, completion_tokens=8, total_tokens=8)
 
-    msg3 = Message(role='user', content=[TextContent(text='How are you?')])  # No usage data
+    msg3 = Message(
+        role='user', content=[TextContent(text='How are you?')]
+    )  # No usage data
 
     # Mock token counter for the message without usage data
     mock_token_counter.return_value = 7
@@ -472,12 +484,14 @@ def test_token_count_mixed_messages(mock_token_counter, mock_litellm_completion,
     assert token_count == 20
     mock_token_counter.assert_called_once()
 
+
 @patch('openhands.llm.llm.litellm_completion')
 @patch('openhands.llm.llm.litellm.token_counter')
-def test_token_count_mixed_types(mock_token_counter, mock_litellm_completion, default_config):
+def test_token_count_mixed_types(
+    mock_token_counter, mock_litellm_completion, default_config
+):
     # Test handling of mixed message types (Message objects and dicts)
-    from litellm import Message as LiteLLMMessage
-    from litellm.types.utils import Choices, ModelResponse, Usage
+    from litellm.types.utils import Usage
 
     # Create a mix of Message objects and dicts
     msg1 = Message(role='user', content=[TextContent(text='Hello!')])
@@ -494,6 +508,7 @@ def test_token_count_mixed_types(mock_token_counter, mock_litellm_completion, de
     # Should use token counter for all messages due to mixed types
     assert token_count == 13
     mock_token_counter.assert_called_once()
+
 
 @patch('openhands.llm.llm.litellm_completion')
 @patch('openhands.llm.llm.litellm.utils._select_tokenizer')
