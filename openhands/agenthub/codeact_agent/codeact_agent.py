@@ -315,7 +315,9 @@ class CodeActAgent(Agent):
             )
         elif isinstance(obs, FileReadObservation):
             message = Message(
-                role='user', content=[TextContent(text=obs.content)]
+                role='user',
+                content=[TextContent(text=obs.content)],
+                event_id=obs.id,
             )  # Content is already truncated by openhands-aci
         elif isinstance(obs, BrowserOutputObservation):
             text = obs.get_agent_obs_text()
