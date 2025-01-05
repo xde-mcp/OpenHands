@@ -447,6 +447,55 @@ def test_token_count_with_usage_data(mock_litellm_completion, default_config):
 
 
 @patch('openhands.llm.llm.litellm_completion')
+@patch('openhands.llm.llm.litellm.token_counter')
+def test_token_count_mixed_messages(mock_token_counter, mock_litellm_completion, default_config):
+    # Test a mix of messages with and without usage data
+    from litellm import Message as LiteLLMMessage
+    from litellm.types.utils import Choices, ModelResponse, Usage
+
+    # Create messages with and without usage data
+    msg1 = Message(role='user', content=[TextContent(text='Hello!')])
+    msg1.usage = Usage(prompt_tokens=5, completion_tokens=0, total_tokens=5)
+
+    msg2 = Message(role='assistant', content=[TextContent(text='Hi there!')])
+    msg2.usage = Usage(prompt_tokens=0, completion_tokens=8, total_tokens=8)
+
+    msg3 = Message(role='user', content=[TextContent(text='How are you?')])  # No usage data
+
+    # Mock token counter for the message without usage data
+    mock_token_counter.return_value = 7
+
+    llm = LLM(default_config)
+    token_count = llm.get_token_count([msg1, msg2, msg3])
+
+    # Should be sum of tokens from usage data (5 + 8) plus counted tokens (7)
+    assert token_count == 20
+    mock_token_counter.assert_called_once()
+
+@patch('openhands.llm.llm.litellm_completion')
+@patch('openhands.llm.llm.litellm.token_counter')
+def test_token_count_mixed_types(mock_token_counter, mock_litellm_completion, default_config):
+    # Test handling of mixed message types (Message objects and dicts)
+    from litellm import Message as LiteLLMMessage
+    from litellm.types.utils import Choices, ModelResponse, Usage
+
+    # Create a mix of Message objects and dicts
+    msg1 = Message(role='user', content=[TextContent(text='Hello!')])
+    msg1.usage = Usage(prompt_tokens=5, completion_tokens=0, total_tokens=5)
+
+    msg2 = {'role': 'assistant', 'content': 'Hi there!'}
+
+    # Mock token counter for the entire list since we have mixed types
+    mock_token_counter.return_value = 13
+
+    llm = LLM(default_config)
+    token_count = llm.get_token_count([msg1, msg2])
+
+    # Should use token counter for all messages due to mixed types
+    assert token_count == 13
+    mock_token_counter.assert_called_once()
+
+@patch('openhands.llm.llm.litellm_completion')
 @patch('openhands.llm.llm.litellm.utils._select_tokenizer')
 @patch('openhands.llm.llm.litellm.token_counter')
 def test_token_count_fallback(
