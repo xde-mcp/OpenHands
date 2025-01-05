@@ -15,6 +15,7 @@ from evaluation.utils.shared import (
     EvalOutput,
     assert_and_raise,
     codeact_user_response,
+    is_fatal_evaluation_error,
     make_metadata,
     prepare_dataset,
     reset_logger_for_multiprocessing,
@@ -120,7 +121,7 @@ def get_config(
         default_agent=metadata.agent_class,
         run_as_openhands=False,
         max_iterations=metadata.max_iterations,
-        runtime=os.environ.get('RUNTIME', 'eventstream'),
+        runtime=os.environ.get('RUNTIME', 'docker'),
         sandbox=SandboxConfig(
             base_container_image=base_container_image,
             enable_auto_lint=True,
@@ -281,6 +282,16 @@ def initialize_runtime(
     logger.info(obs, extra={'msg_type': 'OBSERVATION'})
     assert_and_raise(obs.exit_code == 0, f'Failed to remove git remotes: {str(obs)}')
 
+    action = CmdRunAction(command='which python')
+    action.timeout = 600
+    logger.info(action, extra={'msg_type': 'ACTION'})
+    obs = runtime.run_action(action)
+    logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+    assert_and_raise(
+        obs.exit_code == 0 and 'testbed' in obs.content,
+        f'Expected to find python interpreter from testbed, but got: {str(obs)}',
+    )
+
     logger.info('-' * 30)
     logger.info('END Runtime Initialization Fn')
     logger.info('-' * 30)
@@ -336,8 +347,7 @@ def complete_runtime(
     git_patch = None
     while n_retries < 5:
         action = CmdRunAction(
-            command=f'git diff --no-color --cached {instance["base_commit"]}',
-            keep_prompt=False,
+            command=f'git diff --no-color --cached {instance["base_commit"]}'
         )
         action.timeout = 600 + 100 * n_retries
         logger.info(action, extra={'msg_type': 'ACTION'})
@@ -369,6 +379,7 @@ def process_instance(
     instance: pd.Series,
     metadata: EvalMetadata,
     reset_logger: bool = True,
+    runtime_failure_count: int = 0,
 ) -> EvalOutput:
     config = get_config(instance, metadata)
 
@@ -379,6 +390,15 @@ def process_instance(
     else:
         logger.info(f'Starting evaluation for instance {instance.instance_id}.')
 
+    # Increase resource_factor with increasing attempt_id
+    if runtime_failure_count > 0:
+        config.sandbox.remote_runtime_resource_factor = min(
+            config.sandbox.remote_runtime_resource_factor * (2**runtime_failure_count),
+            8,
+        )
+        logger.warning(
+            f'This is the second attempt for instance {instance.instance_id}, setting resource factor to {config.sandbox.remote_runtime_resource_factor}'
+        )
     runtime = create_runtime(config)
     call_async_from_sync(runtime.connect)
 
@@ -400,11 +420,7 @@ def process_instance(
         )
 
         # if fatal error, throw EvalError to trigger re-run
-        if (
-            state.last_error
-            and 'fatal error during agent execution' in state.last_error
-            and 'stuck in a loop' not in state.last_error
-        ):
+        if is_fatal_evaluation_error(state.last_error):
             raise EvalException('Fatal error detected: ' + state.last_error)
 
         # ======= THIS IS SWE-Bench specific =======
@@ -490,6 +506,8 @@ if __name__ == '__main__':
     if args.llm_config:
         llm_config = get_llm_config_arg(args.llm_config)
         llm_config.log_completions = True
+        # modify_params must be False for evaluation purpose, for reproducibility and accurancy of results
+        llm_config.modify_params = False
 
     if llm_config is None:
         raise ValueError(f'Could not find LLM config: --llm_config {args.llm_config}')
@@ -526,4 +544,5 @@ if __name__ == '__main__':
         args.eval_num_workers,
         process_instance,
         timeout_seconds=120 * 60,  # 2 hour PER instance should be more than enough
+        max_retries=5,
     )
