@@ -4,11 +4,13 @@ import ConfirmIcon from "#/assets/confirm";
 import RejectIcon from "#/assets/reject";
 import { I18nKey } from "#/i18n/declaration";
 
+import type { OverlayPlacement } from "@nextui-org/aria-utils";
+
 interface ActionTooltipProps {
   type?: "confirm" | "reject";
   onClick?: () => void;
   content?: string;
-  side?: string;
+  side?: OverlayPlacement;
   children?: React.ReactNode;
 }
 
