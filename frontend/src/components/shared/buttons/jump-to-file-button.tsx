@@ -24,6 +24,7 @@ export function JumpToFileButton({
       side="top"
     >
       <button
+        type="button"
         data-testid="jump-to-file-button"
         onClick={onClick}
         disabled={isDisabled}
@@ -31,7 +32,7 @@ export function JumpToFileButton({
           "absolute top-2 right-12 p-2 rounded-lg",
           "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700",
           "transition-colors duration-200",
-          isDisabled && "opacity-50 cursor-not-allowed"
+          isDisabled && "opacity-50 cursor-not-allowed",
         )}
       >
         <VscGoToFile size={16} />
