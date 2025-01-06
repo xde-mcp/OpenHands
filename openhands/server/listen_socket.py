@@ -1,9 +1,10 @@
 from urllib.parse import parse_qs
 
-from github import Github
+import jwt
 from socketio.exceptions import ConnectionRefusedError
 
 from openhands.core.logger import openhands_logger as logger
+from openhands.core.schema.agent import AgentState
 from openhands.events.action import (
     NullAction,
 )
@@ -13,12 +14,10 @@ from openhands.events.observation import (
 from openhands.events.observation.agent import AgentStateChangedObservation
 from openhands.events.serialization import event_to_dict
 from openhands.events.stream import AsyncEventStreamWrapper
+from openhands.server.routes.settings import ConversationStoreImpl, SettingsStoreImpl
 from openhands.server.session.manager import ConversationDoesNotExistError
-from openhands.server.shared import config, session_manager, sio
-from openhands.storage.conversation.conversation_store import (
-    ConversationStore,
-)
-from openhands.utils.async_utils import call_sync_from_async
+from openhands.server.shared import config, openhands_config, session_manager, sio
+from openhands.server.types import AppMode
 
 
 @sio.event
@@ -31,27 +30,38 @@ async def connect(connection_id: str, environ, auth):
         logger.error('No conversation_id in query params')
         raise ConnectionRefusedError('No conversation_id in query params')
 
-    user_id = ''
-    if auth and 'github_token' in auth:
-        g = Github(auth['github_token'])
-        gh_user = await call_sync_from_async(g.get_user)
-        user_id = gh_user.id
+    user_id = -1
+    if openhands_config.app_mode != AppMode.OSS:
+        cookies_str = environ.get('HTTP_COOKIE', '')
+        cookies = dict(cookie.split('=', 1) for cookie in cookies_str.split('; '))
+        signed_token = cookies.get('github_auth', '')
+        if not signed_token:
+            logger.error('No github_auth cookie')
+            raise ConnectionRefusedError('No github_auth cookie')
+        decoded = jwt.decode(signed_token, config.jwt_secret, algorithms=['HS256'])
+        user_id = decoded['github_user_id']
 
-    logger.info(f'User {user_id} is connecting to conversation {conversation_id}')
+        logger.info(f'User {user_id} is connecting to conversation {conversation_id}')
 
-    conversation_store = await ConversationStore.get_instance(config)
-    metadata = await conversation_store.get_metadata(conversation_id)
-    if metadata.github_user_id != user_id:
-        logger.error(
-            f'User {user_id} is not allowed to join conversation {conversation_id}'
-        )
-        raise ConnectionRefusedError(
-            f'User {user_id} is not allowed to join conversation {conversation_id}'
-        )
+        conversation_store = await ConversationStoreImpl.get_instance(config, user_id)
+        metadata = await conversation_store.get_metadata(conversation_id)
+        if metadata.github_user_id != user_id:
+            logger.error(
+                f'User {user_id} is not allowed to join conversation {conversation_id}'
+            )
+            raise ConnectionRefusedError(
+                f'User {user_id} is not allowed to join conversation {conversation_id}'
+            )
+
+    settings_store = await SettingsStoreImpl.get_instance(config, user_id)
+    settings = await settings_store.load()
+
+    if not settings:
+        raise ConnectionRefusedError('Settings not found')
 
     try:
         event_stream = await session_manager.join_conversation(
-            conversation_id, connection_id
+            conversation_id, connection_id, settings
         )
     except ConversationDoesNotExistError:
         logger.error(f'Conversation {conversation_id} does not exist')
@@ -69,12 +79,11 @@ async def connect(connection_id: str, environ, auth):
         ):
             continue
         elif isinstance(event, AgentStateChangedObservation):
-            if event.agent_state == 'init':
+            if event.agent_state == AgentState.INIT:
                 await sio.emit('oh_event', event_to_dict(event), to=connection_id)
-            else:
-                agent_state_changed = event
-                continue
-        await sio.emit('oh_event', event_to_dict(event), to=connection_id)
+            agent_state_changed = event
+        else:
+            await sio.emit('oh_event', event_to_dict(event), to=connection_id)
     if agent_state_changed:
         await sio.emit('oh_event', event_to_dict(agent_state_changed), to=connection_id)
 
