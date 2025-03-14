@@ -26,7 +26,4 @@ jobs:
           git remote add upstream https://github.com/All-Hands-AI/OpenHands.git
           git fetch upstream
           git merge upstream/main  # 或者 upstream/master，取决于原始仓库的主分支
-
-      - name: Push changes
-        run: |
-          git push origin HEAD:main  # 或者 HEAD:master
+          git push origin main
