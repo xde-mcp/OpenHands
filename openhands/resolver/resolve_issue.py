@@ -71,20 +71,12 @@ class IssueResolver:
             base_domain: The base domain for the git server.
         """
 
-        base_container_image = args.base_container_image
-        runtime_container_image = args.runtime_container_image
-
-        if runtime_container_image is not None and base_container_image is not None:
-            raise ValueError('Cannot provide both runtime and base container images.')
-
-        if (
-            runtime_container_image is None
-            and base_container_image is None
-            and not args.is_experimental
-        ):
-            runtime_container_image = (
-                f'ghcr.io/all-hands-ai/runtime:{openhands.__version__}-nikolaik'
-            )
+        # Setup and validate container images
+        self.sandbox_config = self._setup_sandbox_config(
+            args.base_container_image,
+            args.runtime_container_image,
+            args.is_experimental,
+        )
 
         parts = args.selected_repo.rsplit('/', 1)
         if len(parts) < 2:
@@ -162,8 +154,6 @@ class IssueResolver:
         self.owner = owner
         self.repo = repo
         self.platform = platform
-        self.runtime_container_image = runtime_container_image
-        self.base_container_image = base_container_image
         self.max_iterations = args.max_iterations
         self.output_dir = args.output_dir
         self.llm_config = llm_config
@@ -172,7 +162,6 @@ class IssueResolver:
         self.repo_instruction = repo_instruction
         self.issue_number = args.issue_number
         self.comment_id = args.comment_id
-        self.platform = platform
 
         factory = IssueHandlerFactory(
             owner=self.owner,
@@ -186,6 +175,54 @@ class IssueResolver:
         )
         self.issue_handler = factory.create()
 
+    @classmethod
+    def _setup_sandbox_config(
+        cls,
+        base_container_image: str | None,
+        runtime_container_image: str | None,
+        is_experimental: bool,
+    ) -> SandboxConfig:
+        if runtime_container_image is not None and base_container_image is not None:
+            raise ValueError('Cannot provide both runtime and base container images.')
+
+        if (
+            runtime_container_image is None
+            and base_container_image is None
+            and not is_experimental
+        ):
+            runtime_container_image = (
+                f'ghcr.io/all-hands-ai/runtime:{openhands.__version__}-nikolaik'
+            )
+
+        # Convert container image values to string or None
+        container_base = (
+            str(base_container_image) if base_container_image is not None else None
+        )
+        container_runtime = (
+            str(runtime_container_image)
+            if runtime_container_image is not None
+            else None
+        )
+
+        sandbox_config = SandboxConfig(
+            base_container_image=container_base,
+            runtime_container_image=container_runtime,
+            enable_auto_lint=False,
+            use_host_network=False,
+            timeout=300,
+        )
+
+        # Configure sandbox for GitLab CI environment
+        if cls.GITLAB_CI:
+            sandbox_config.local_runtime_url = os.getenv(
+                'LOCAL_RUNTIME_URL', 'http://localhost'
+            )
+            user_id = os.getuid() if hasattr(os, 'getuid') else 1000
+            if user_id == 0:
+                sandbox_config.user_id = get_unique_uid()
+
+        return sandbox_config
+
     def initialize_runtime(
         self,
         runtime: Runtime,
@@ -193,7 +230,7 @@ class IssueResolver:
         """Initialize the runtime for the agent.
 
         This function is called before the runtime is used to run the agent.
-        Currently it does nothing.
+        It sets up git configuration and runs the setup script if it exists.
         """
         logger.info('-' * 30)
         logger.info('BEGIN Runtime Completion Fn')
@@ -219,6 +256,14 @@ class IssueResolver:
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
         if not isinstance(obs, CmdOutputObservation) or obs.exit_code != 0:
             raise RuntimeError(f'Failed to set git config.\n{obs}')
+
+        # Run setup script if it exists
+        logger.info('Checking for .openhands/setup.sh script...')
+        runtime.maybe_run_setup_script()
+
+        # Setup git hooks if they exist
+        logger.info('Checking for .openhands/pre-commit.sh script...')
+        runtime.maybe_setup_git_hooks()
 
     async def complete_runtime(
         self,
@@ -324,32 +369,12 @@ class IssueResolver:
             shutil.rmtree(workspace_base)
         shutil.copytree(os.path.join(self.output_dir, 'repo'), workspace_base)
 
-        # This code looks unnecessary because these are default values in the config class
-        # they're set by default if nothing else overrides them
-        # FIXME we should remove them here
-        sandbox_config = SandboxConfig(
-            base_container_image=self.base_container_image,
-            runtime_container_image=self.runtime_container_image,
-            enable_auto_lint=False,
-            use_host_network=False,
-            # large enough timeout, since some testcases take very long to run
-            timeout=300,
-        )
-
-        if os.getenv('GITLAB_CI') == 'true':
-            sandbox_config.local_runtime_url = os.getenv(
-                'LOCAL_RUNTIME_URL', 'http://localhost'
-            )
-            user_id = os.getuid() if hasattr(os, 'getuid') else 1000
-            if user_id == 0:
-                sandbox_config.user_id = get_unique_uid()
-
         config = AppConfig(
             default_agent='CodeActAgent',
             runtime='docker',
             max_budget_per_task=4,
             max_iterations=self.max_iterations,
-            sandbox=sandbox_config,
+            sandbox=self.sandbox_config,
             # do not mount workspace
             workspace_base=workspace_base,
             workspace_mount_path=workspace_base,
