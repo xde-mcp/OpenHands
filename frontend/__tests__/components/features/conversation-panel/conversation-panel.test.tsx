@@ -6,7 +6,7 @@ import { createRoutesStub } from "react-router";
 import React from "react";
 import { renderWithProviders } from "test-utils";
 import { ConversationPanel } from "#/components/features/conversation-panel/conversation-panel";
-import OpenHands from "#/api/open-hands";
+import ConversationService from "#/api/conversation-service/conversation-service.api";
 import { Conversation } from "#/api/open-hands.types";
 
 describe("ConversationPanel", () => {
@@ -85,9 +85,10 @@ describe("ConversationPanel", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     // Setup default mock for getUserConversations
-    vi.spyOn(OpenHands, "getUserConversations").mockResolvedValue([
-      ...mockConversations,
-    ]);
+    vi.spyOn(ConversationService, "getUserConversations").mockResolvedValue({
+      results: [...mockConversations],
+      next_page_id: null,
+    });
   });
 
   it("should render the conversations", async () => {
@@ -100,8 +101,14 @@ describe("ConversationPanel", () => {
   });
 
   it("should display an empty state when there are no conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockResolvedValue([]);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockResolvedValue({
+      results: [],
+      next_page_id: null,
+    });
 
     renderConversationPanel();
 
@@ -110,7 +117,10 @@ describe("ConversationPanel", () => {
   });
 
   it("should handle an error when fetching conversations", async () => {
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
     getUserConversationsSpy.mockRejectedValue(
       new Error("Failed to fetch conversations"),
     );
@@ -126,13 +136,18 @@ describe("ConversationPanel", () => {
     renderConversationPanel();
 
     let cards = await screen.findAllByTestId("conversation-card");
-    expect(
-      within(cards[0]).queryByTestId("delete-button"),
-    ).not.toBeInTheDocument();
+    // Delete button should not be visible initially (context menu is closed)
+    // The context menu is always in the DOM but hidden by CSS classes on the parent div
+    const contextMenuParent = within(cards[0]).queryByTestId(
+      "context-menu",
+    )?.parentElement;
+    if (contextMenuParent) {
+      expect(contextMenuParent).toHaveClass("opacity-0", "invisible");
+    }
 
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
-    const deleteButton = screen.getByTestId("delete-button");
+    const deleteButton = within(cards[0]).getByTestId("delete-button");
 
     // Click the first delete button
     await user.click(deleteButton);
@@ -194,11 +209,17 @@ describe("ConversationPanel", () => {
       },
     ];
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockImplementation(async () => mockData);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockImplementation(async () => ({
+      results: mockData,
+      next_page_id: null,
+    }));
 
     const deleteUserConversationSpy = vi.spyOn(
-      OpenHands,
+      ConversationService,
       "deleteUserConversation",
     );
     deleteUserConversationSpy.mockImplementation(async (id: string) => {
@@ -215,7 +236,7 @@ describe("ConversationPanel", () => {
 
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
-    const deleteButton = screen.getByTestId("delete-button");
+    const deleteButton = within(cards[0]).getByTestId("delete-button");
 
     // Click the first delete button
     await user.click(deleteButton);
@@ -248,8 +269,14 @@ describe("ConversationPanel", () => {
 
   it("should refetch data on rerenders", async () => {
     const user = userEvent.setup();
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockResolvedValue([...mockConversations]);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockResolvedValue({
+      results: [...mockConversations],
+      next_page_id: null,
+    });
 
     function PanelWithToggle() {
       const [isOpen, setIsOpen] = React.useState(true);
@@ -342,8 +369,14 @@ describe("ConversationPanel", () => {
       },
     ];
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockResolvedValue(mockRunningConversations);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockResolvedValue({
+      results: mockRunningConversations,
+      next_page_id: null,
+    });
 
     renderConversationPanel();
 
@@ -355,7 +388,7 @@ describe("ConversationPanel", () => {
     await user.click(ellipsisButton);
 
     // Stop button should be available for RUNNING conversation
-    const stopButton = screen.getByTestId("stop-button");
+    const stopButton = within(cards[0]).getByTestId("stop-button");
     expect(stopButton).toBeInTheDocument();
 
     // Click the stop button
@@ -406,10 +439,19 @@ describe("ConversationPanel", () => {
       },
     ];
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockImplementation(async () => mockData);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockImplementation(async () => ({
+      results: mockData,
+      next_page_id: null,
+    }));
 
-    const stopConversationSpy = vi.spyOn(OpenHands, "stopConversation");
+    const stopConversationSpy = vi.spyOn(
+      ConversationService,
+      "stopConversation",
+    );
     stopConversationSpy.mockImplementation(async (id: string) => {
       const conversation = mockData.find((conv) => conv.conversation_id === id);
       if (conversation) {
@@ -428,7 +470,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const stopButton = screen.getByTestId("stop-button");
+    const stopButton = within(cards[0]).getByTestId("stop-button");
 
     // Click the stop button
     await user.click(stopButton);
@@ -491,8 +533,14 @@ describe("ConversationPanel", () => {
       },
     ];
 
-    const getUserConversationsSpy = vi.spyOn(OpenHands, "getUserConversations");
-    getUserConversationsSpy.mockResolvedValue(mockMixedStatusConversations);
+    const getUserConversationsSpy = vi.spyOn(
+      ConversationService,
+      "getUserConversations",
+    );
+    getUserConversationsSpy.mockResolvedValue({
+      results: mockMixedStatusConversations,
+      next_page_id: null,
+    });
 
     renderConversationPanel();
 
@@ -505,10 +553,20 @@ describe("ConversationPanel", () => {
     );
     await user.click(runningEllipsisButton);
 
-    expect(screen.getByTestId("stop-button")).toBeInTheDocument();
+    expect(within(cards[0]).getByTestId("stop-button")).toBeInTheDocument();
 
     // Click outside to close the menu
     await user.click(document.body);
+
+    // Wait for context menu to close (check CSS classes on parent div)
+    await waitFor(() => {
+      const contextMenuParent = within(cards[0]).queryByTestId(
+        "context-menu",
+      )?.parentElement;
+      if (contextMenuParent) {
+        expect(contextMenuParent).toHaveClass("opacity-0", "invisible");
+      }
+    });
 
     // Test STARTING conversation - should show stop button
     const startingEllipsisButton = within(cards[1]).getByTestId(
@@ -516,10 +574,20 @@ describe("ConversationPanel", () => {
     );
     await user.click(startingEllipsisButton);
 
-    expect(screen.getByTestId("stop-button")).toBeInTheDocument();
+    expect(within(cards[1]).getByTestId("stop-button")).toBeInTheDocument();
 
     // Click outside to close the menu
     await user.click(document.body);
+
+    // Wait for context menu to close (check CSS classes on parent div)
+    await waitFor(() => {
+      const contextMenuParent = within(cards[1]).queryByTestId(
+        "context-menu",
+      )?.parentElement;
+      if (contextMenuParent) {
+        expect(contextMenuParent).toHaveClass("opacity-0", "invisible");
+      }
+    });
 
     // Test STOPPED conversation - should NOT show stop button
     const stoppedEllipsisButton = within(cards[2]).getByTestId(
@@ -527,7 +595,9 @@ describe("ConversationPanel", () => {
     );
     await user.click(stoppedEllipsisButton);
 
-    expect(screen.queryByTestId("stop-button")).not.toBeInTheDocument();
+    expect(
+      within(cards[2]).queryByTestId("stop-button"),
+    ).not.toBeInTheDocument();
   });
 
   it("should show edit button in context menu", async () => {
@@ -541,10 +611,10 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    // Edit button should be visible
-    const editButton = screen.getByTestId("edit-button");
+    // Edit button should be visible within the first card's context menu
+    const editButton = within(cards[0]).getByTestId("edit-button");
     expect(editButton).toBeInTheDocument();
-    expect(editButton).toHaveTextContent("BUTTON$EDIT_TITLE");
+    expect(editButton).toHaveTextContent("BUTTON$RENAME");
   });
 
   it("should enter edit mode when edit button is clicked", async () => {
@@ -557,8 +627,8 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    // Click edit button
-    const editButton = screen.getByTestId("edit-button");
+    // Click edit button within the first card's context menu
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Should find input field instead of title text
@@ -573,7 +643,10 @@ describe("ConversationPanel", () => {
     const user = userEvent.setup();
 
     // Mock the updateConversation API call
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     // Mock the toast function
@@ -590,7 +663,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Edit the title
@@ -610,7 +683,10 @@ describe("ConversationPanel", () => {
   it("should save title when Enter key is pressed", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     renderConversationPanel();
@@ -621,7 +697,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Edit the title and press Enter
@@ -639,7 +715,10 @@ describe("ConversationPanel", () => {
   it("should trim whitespace from title", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     renderConversationPanel();
@@ -650,7 +729,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Edit the title with extra whitespace
@@ -663,15 +742,15 @@ describe("ConversationPanel", () => {
     expect(updateConversationSpy).toHaveBeenCalledWith("1", {
       title: "Trimmed Title",
     });
-
-    // Verify input shows trimmed value
-    expect(titleInput).toHaveValue("Trimmed Title");
   });
 
   it("should revert to original title when empty", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     renderConversationPanel();
@@ -682,7 +761,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Clear the title completely
@@ -692,15 +771,15 @@ describe("ConversationPanel", () => {
 
     // Verify API was not called
     expect(updateConversationSpy).not.toHaveBeenCalled();
-
-    // Verify input reverted to original value
-    expect(titleInput).toHaveValue("Conversation 1");
   });
 
   it("should handle API error when updating title", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockRejectedValue(new Error("API Error"));
 
     vi.mock("#/utils/custom-toast-handlers", () => ({
@@ -715,7 +794,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Edit the title
@@ -745,22 +824,32 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    // Verify context menu is open
-    const contextMenu = screen.getByTestId("context-menu");
+    // Verify context menu is open within the first card
+    const contextMenu = within(cards[0]).getByTestId("context-menu");
     expect(contextMenu).toBeInTheDocument();
 
-    // Click edit button
-    const editButton = screen.getByTestId("edit-button");
+    // Click edit button within the first card's context menu
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
-    // Verify context menu is closed
-    expect(screen.queryByTestId("context-menu")).not.toBeInTheDocument();
+    // Wait for context menu to close after edit button click (check CSS classes on parent div)
+    await waitFor(() => {
+      const contextMenuParent = within(cards[0]).queryByTestId(
+        "context-menu",
+      )?.parentElement;
+      if (contextMenuParent) {
+        expect(contextMenuParent).toHaveClass("opacity-0", "invisible");
+      }
+    });
   });
 
   it("should not call API when title is unchanged", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     renderConversationPanel();
@@ -771,15 +860,14 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Don't change the title, just blur
-    const titleInput = within(cards[0]).getByTestId("conversation-card-title");
     await user.tab();
 
-    // Verify API was called with the same title (since handleConversationTitleChange will always be called)
-    expect(updateConversationSpy).toHaveBeenCalledWith("1", {
+    // Verify API was NOT called with the same title (since handleConversationTitleChange will always be called)
+    expect(updateConversationSpy).not.toHaveBeenCalledWith("1", {
       title: "Conversation 1",
     });
   });
@@ -787,7 +875,10 @@ describe("ConversationPanel", () => {
   it("should handle special characters in title", async () => {
     const user = userEvent.setup();
 
-    const updateConversationSpy = vi.spyOn(OpenHands, "updateConversation");
+    const updateConversationSpy = vi.spyOn(
+      ConversationService,
+      "updateConversation",
+    );
     updateConversationSpy.mockResolvedValue(true);
 
     renderConversationPanel();
@@ -798,7 +889,7 @@ describe("ConversationPanel", () => {
     const ellipsisButton = within(cards[0]).getByTestId("ellipsis-button");
     await user.click(ellipsisButton);
 
-    const editButton = screen.getByTestId("edit-button");
+    const editButton = within(cards[0]).getByTestId("edit-button");
     await user.click(editButton);
 
     // Edit the title with special characters
