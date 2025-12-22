@@ -7,13 +7,15 @@ import React, {
   useMemo,
   useRef,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocket, WebSocketHookOptions } from "#/hooks/use-websocket";
 import { useEventStore } from "#/stores/use-event-store";
 import { useErrorMessageStore } from "#/stores/error-message-store";
 import { useOptimisticUserMessageStore } from "#/stores/optimistic-user-message-store";
 import { useV1ConversationStateStore } from "#/stores/v1-conversation-state-store";
-import { useCommandStore } from "#/state/command-store";
+import { useCommandStore } from "#/stores/command-store";
+import { useBrowserStore } from "#/stores/browser-store";
 import {
   isV1Event,
   isAgentErrorEvent,
@@ -26,6 +28,9 @@ import {
   isExecuteBashActionEvent,
   isExecuteBashObservationEvent,
   isConversationErrorEvent,
+  isPlanningFileEditorObservationEvent,
+  isBrowserObservationEvent,
+  isBrowserNavigateActionEvent,
 } from "#/types/v1/type-guards";
 import { ConversationStateUpdateEventStats } from "#/types/v1/core/events/conversation-state-event";
 import { handleActionEventCacheInvalidation } from "#/utils/cache-utils";
@@ -35,10 +40,12 @@ import type {
   V1SendMessageRequest,
 } from "#/api/conversation-service/v1-conversation-service.types";
 import EventService from "#/api/event-service/event-service.api";
-import { useConversationStore } from "#/state/conversation-store";
+import { useConversationStore } from "#/stores/conversation-store";
 import { isBudgetOrCreditError } from "#/utils/error-handler";
 import { useTracking } from "#/hooks/use-tracking";
+import { useReadConversationFile } from "#/hooks/mutation/use-read-conversation-file";
 import useMetricsStore from "#/stores/metrics-store";
+import { I18nKey } from "#/i18n/declaration";
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export type V1_WebSocketConnectionState =
@@ -102,11 +109,23 @@ export function ConversationWebSocketProvider({
     number | null
   >(null);
 
-  const { conversationMode } = useConversationStore();
+  const { conversationMode, setPlanContent } = useConversationStore();
+
+  // Hook for reading conversation file
+  const { mutate: readConversationFile } = useReadConversationFile();
 
   // Separate received event count tracking per connection
   const receivedEventCountRefMain = useRef(0);
   const receivedEventCountRefPlanning = useRef(0);
+
+  // Track the latest PlanningFileEditorObservation event during history replay
+  // We'll only call the API once after history loading completes
+  const latestPlanningFileEventRef = useRef<{
+    path: string;
+    conversationId: string;
+  } | null>(null);
+
+  const { t } = useTranslation();
 
   // Helper function to update metrics from stats event
   const updateMetricsFromStats = useCallback(
@@ -235,11 +254,40 @@ export function ConversationWebSocketProvider({
     receivedEventCountRefPlanning,
   ]);
 
+  // Call API once after history loading completes if we tracked any PlanningFileEditorObservation events
+  useEffect(() => {
+    if (!isLoadingHistoryPlanning && latestPlanningFileEventRef.current) {
+      const { path, conversationId: currentPlanningConversationId } =
+        latestPlanningFileEventRef.current;
+
+      readConversationFile(
+        {
+          conversationId: currentPlanningConversationId,
+          filePath: path,
+        },
+        {
+          onSuccess: (fileContent) => {
+            setPlanContent(fileContent);
+          },
+          onError: (error) => {
+            // eslint-disable-next-line no-console
+            console.warn("Failed to read conversation file:", error);
+          },
+        },
+      );
+
+      // Clear the ref after calling the API
+      latestPlanningFileEventRef.current = null;
+    }
+  }, [isLoadingHistoryPlanning, readConversationFile, setPlanContent]);
+
   useEffect(() => {
     hasConnectedRefMain.current = false;
     setIsLoadingHistoryPlanning(!!subConversationIds?.length);
     setExpectedEventCountPlanning(null);
     receivedEventCountRefPlanning.current = 0;
+    // Reset the tracked event ref when sub-conversations change
+    latestPlanningFileEventRef.current = null;
   }, [subConversationIds]);
 
   // Merged loading history state - true if either connection is still loading
@@ -254,6 +302,8 @@ export function ConversationWebSocketProvider({
     setIsLoadingHistoryMain(true);
     setExpectedEventCountMain(null);
     receivedEventCountRefMain.current = 0;
+    // Reset the tracked event ref when conversation changes
+    latestPlanningFileEventRef.current = null;
   }, [conversationId]);
 
   // Separate message handlers for each connection
@@ -339,6 +389,22 @@ export function ConversationWebSocketProvider({
               .map((c) => c.text)
               .join("\n");
             appendOutput(textContent);
+          }
+
+          // Handle BrowserObservation events - update browser store with screenshot
+          if (isBrowserObservationEvent(event)) {
+            const { screenshot_data: screenshotData } = event.observation;
+            if (screenshotData) {
+              const screenshotSrc = screenshotData.startsWith("data:")
+                ? screenshotData
+                : `data:image/png;base64,${screenshotData}`;
+              useBrowserStore.getState().setScreenshotSrc(screenshotSrc);
+            }
+          }
+
+          // Handle BrowserNavigateAction events - update browser store with URL
+          if (isBrowserNavigateActionEvent(event)) {
+            useBrowserStore.getState().setUrl(event.action.url);
           }
         }
       } catch (error) {
@@ -438,6 +504,41 @@ export function ConversationWebSocketProvider({
               .join("\n");
             appendOutput(textContent);
           }
+
+          // Handle PlanningFileEditorObservation events - read and update plan content
+          if (isPlanningFileEditorObservationEvent(event)) {
+            const planningAgentConversation = subConversations?.[0];
+            const planningConversationId = planningAgentConversation?.id;
+
+            if (planningConversationId && event.observation.path) {
+              // During history replay, track the latest event but don't call API
+              // After history loading completes, we'll call the API once with the latest event
+              if (isLoadingHistoryPlanning) {
+                latestPlanningFileEventRef.current = {
+                  path: event.observation.path,
+                  conversationId: planningConversationId,
+                };
+              } else {
+                // History loading is complete - this is a new real-time event
+                // Call the API immediately for real-time updates
+                readConversationFile(
+                  {
+                    conversationId: planningConversationId,
+                    filePath: event.observation.path,
+                  },
+                  {
+                    onSuccess: (fileContent) => {
+                      setPlanContent(fileContent);
+                    },
+                    onError: (error) => {
+                      // eslint-disable-next-line no-console
+                      console.warn("Failed to read conversation file:", error);
+                    },
+                  },
+                );
+              }
+            }
+          }
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -455,6 +556,8 @@ export function ConversationWebSocketProvider({
       setExecutionStatus,
       appendInput,
       appendOutput,
+      readConversationFile,
+      setPlanContent,
       updateMetricsFromStats,
     ],
   );
@@ -479,9 +582,13 @@ export function ConversationWebSocketProvider({
         removeErrorMessage(); // Clear any previous error messages on successful connection
 
         // Fetch expected event count for history loading detection
-        if (conversationId) {
+        if (conversationId && conversationUrl) {
           try {
-            const count = await EventService.getEventCount(conversationId);
+            const count = await EventService.getEventCount(
+              conversationId,
+              conversationUrl,
+              sessionApiKey,
+            );
             setExpectedEventCountMain(count);
 
             // If no events expected, mark as loaded immediately
@@ -500,7 +607,7 @@ export function ConversationWebSocketProvider({
         // This prevents showing errors during initial connection attempts (e.g., when auto-starting a conversation)
         if (event.code !== 1000 && hasConnectedRefMain.current) {
           setErrorMessage(
-            `Connection lost: ${event.reason || "Unexpected disconnect"}`,
+            `${t(I18nKey.STATUS$CONNECTION_LOST)}: ${event.reason || t(I18nKey.STATUS$DISCONNECTED_REFRESH_PAGE)}`,
           );
         }
       },
@@ -519,6 +626,7 @@ export function ConversationWebSocketProvider({
     removeErrorMessage,
     sessionApiKey,
     conversationId,
+    conversationUrl,
   ]);
 
   // Separate WebSocket options for planning agent connection
@@ -543,10 +651,15 @@ export function ConversationWebSocketProvider({
         removeErrorMessage(); // Clear any previous error messages on successful connection
 
         // Fetch expected event count for history loading detection
-        if (planningAgentConversation?.id) {
+        if (
+          planningAgentConversation?.id &&
+          planningAgentConversation.conversation_url
+        ) {
           try {
             const count = await EventService.getEventCount(
               planningAgentConversation.id,
+              planningAgentConversation.conversation_url,
+              planningAgentConversation.session_api_key,
             );
             setExpectedEventCountPlanning(count);
 
@@ -566,7 +679,7 @@ export function ConversationWebSocketProvider({
         // This prevents showing errors during initial connection attempts (e.g., when auto-starting a conversation)
         if (event.code !== 1000 && hasConnectedRefPlanning.current) {
           setErrorMessage(
-            `Connection lost: ${event.reason || "Unexpected disconnect"}`,
+            `${t(I18nKey.STATUS$CONNECTION_LOST)}: ${event.reason || t(I18nKey.STATUS$DISCONNECTED_REFRESH_PAGE)}`,
           );
         }
       },
